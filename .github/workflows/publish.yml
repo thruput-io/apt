@@ -1,0 +1,98 @@
+name: publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 * * * *'
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build and sign the archive
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.releases.outputs.changed }}
+      url: ${{ steps.pages.outputs.base_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pages
+        uses: actions/configure-pages@v5
+      - id: releases
+        name: take the latest release of every source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p debs site
+          while read -r repo; do
+            [ -n "$repo" ] || continue
+            tag=$(gh release view --repo "$repo" --json tagName --jq .tagName)
+            gh release download "$tag" --repo "$repo" --pattern '*.deb' --dir debs
+            echo "$repo $tag"
+          done < sources.txt > site/releases.txt
+          cat site/releases.txt
+          served=$(curl -fsSL "$URL/releases.txt" || true)
+          if [ "$served" = "$(cat site/releases.txt)" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.releases.outputs.changed == 'true'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends reprepro gnupg
+      - if: steps.releases.outputs.changed == 'true'
+        env:
+          ARCHIVE_SIGNING_KEY: ${{ secrets.ARCHIVE_SIGNING_KEY }}
+          URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "${ARCHIVE_SIGNING_KEY:?the repository has no ARCHIVE_SIGNING_KEY secret, run the key workflow}" > "$key"
+          bash scripts/archive.sh debs site "$URL" "$key"
+      - if: steps.releases.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: deploy to pages
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify:
+    name: install every package from the published archive
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    container: debian:testing-slim
+    env:
+      URL: ${{ needs.build.outputs.url }}
+    steps:
+      - run: |
+          set -euo pipefail
+          apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
+          curl -fsSL "$URL/thruput-io.sources" -o /etc/apt/sources.list.d/thruput-io.sources
+          apt-get update -o APT::Update::Error-Mode=any
+          packages=$(curl -fsSL "$URL/dists/stable/main/binary-$(dpkg --print-architecture)/Packages" \
+            | awk '/^Package: / { print $2 }' | sort -u)
+          apt-get install -y --no-install-recommends $packages
+          echo "installed from $URL: $(echo $packages | wc -w) packages"
