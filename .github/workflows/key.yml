@@ -4,27 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths: [.github/workflows/key.yml]
 
 jobs:
   key:
     name: Generate the key the archive is signed with
     runs-on: ubuntu-latest
     steps:
-      - id: held
-        name: Keep the key the archive already signs with
-        env:
-          HELD: ${{ secrets.ARCHIVE_SIGNING_KEY != '' }}
-        run: |
-          echo "held=$HELD" >> "$GITHUB_OUTPUT"
-          if [ "$HELD" = true ]; then
-            echo "ARCHIVE_SIGNING_KEY is already set; the archive keeps the key it is signed with"
-          fi
-
-      - if: steps.held.outputs.held != 'true'
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Generate App Token
-        if: steps.held.outputs.held != 'true'
         id: generate_token
         uses: actions/create-github-app-token@v1
         with:
@@ -32,7 +21,6 @@ jobs:
           private-key: ${{ secrets.HEMMING_PRIVATE_KEY }}
 
       - name: Generate and store the signing key
-        if: steps.held.outputs.held != 'true'
         env:
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
         run: |

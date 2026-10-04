@@ -15,8 +15,8 @@ Release. `publish` takes the latest release of each, builds one archive with
 `reprepro` (suite `stable`, component `main`), signs it, deploys it to Pages and
 then installs every package in it on a clean `debian:testing-slim`.
 
-It runs every hour, after `key` (so after every push to `main`), and by hand
-from the Actions tab. A
+It runs every hour, on a push to `main`, after `key`, and by hand from the
+Actions tab. A
 scheduled run whose releases are already served does nothing.
 
 Nothing here holds a credential to another repository: releases are public, and
@@ -29,7 +29,7 @@ Add `owner/repo` to `sources.txt`. Its releases must carry `.deb` assets.
 ## Setup
 
 1. Settings → Pages → Source: **GitHub Actions**.
-2. Nothing else. `key` runs on every merge to `main` and generates
-   `ARCHIVE_SIGNING_KEY` the first time only, storing it as a repository secret
-   through the Hemming app. Once the secret exists it never replaces it. To
-   rotate the key, delete the secret and run `key` again.
+2. Nothing else. `key` runs once, on the merge that adds it to `main`: it
+   generates `ARCHIVE_SIGNING_KEY` and stores it as a repository secret through
+   the Hemming app, and `publish` follows it. To rotate the key, run `key` by
+   hand.

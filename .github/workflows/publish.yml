@@ -2,6 +2,9 @@ name: publish
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: [.github/workflows/key.yml]
   workflow_run:
     workflows: [key]
     types: [completed]
