@@ -1,15 +1,11 @@
 name: publish
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths-ignore: [.github/workflows/key.yml]
+  repository_dispatch:
+    types: [release]
   workflow_run:
     workflows: [key]
     types: [completed]
-  schedule:
-    - cron: '17 * * * *'
 
 concurrency:
   group: pages
@@ -24,7 +20,6 @@ jobs:
     name: build and sign the archive
     runs-on: ubuntu-latest
     outputs:
-      changed: ${{ steps.releases.outputs.changed }}
       url: ${{ steps.pages.outputs.base_url }}
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +29,6 @@ jobs:
         name: take the latest release of every source
         env:
           GH_TOKEN: ${{ github.token }}
-          URL: ${{ steps.pages.outputs.base_url }}
         run: |
           set -euo pipefail
           mkdir -p debs site
@@ -45,16 +39,8 @@ jobs:
             echo "$repo $tag"
           done < sources.txt > site/releases.txt
           cat site/releases.txt
-          served=$(curl -fsSL "$URL/releases.txt" || true)
-          if [ "$served" = "$(cat site/releases.txt)" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.releases.outputs.changed == 'true'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends reprepro gnupg
-      - if: steps.releases.outputs.changed == 'true'
-        env:
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends reprepro gnupg
+      - env:
           ARCHIVE_SIGNING_KEY: ${{ secrets.ARCHIVE_SIGNING_KEY }}
           URL: ${{ steps.pages.outputs.base_url }}
         run: |
@@ -63,15 +49,13 @@ jobs:
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "${ARCHIVE_SIGNING_KEY:?the repository has no ARCHIVE_SIGNING_KEY secret, run the key workflow}" > "$key"
           bash scripts/archive.sh debs site "$URL" "$key"
-      - if: steps.releases.outputs.changed == 'true'
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deploy:
     name: deploy to pages
     needs: build
-    if: needs.build.outputs.changed == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write
