@@ -12,8 +12,10 @@ sudo apt-get update
 
 Every repository named in `sources.txt` attaches its `.deb` files to a GitHub
 Release. `publish` takes the latest release of each, builds one archive with
-`reprepro` (suite `stable`, component `main`), signs it, deploys it to Pages and
-then installs every package in it on a clean `debian:testing-slim`.
+`reprepro` (suite `stable`, component `main`), signs it, installs every package
+in it on a clean `debian:testing-slim`, and only then deploys it to Pages and
+checks that Pages serves it signed. `lint` runs `shellcheck` and `actionlint`
+on every pull request.
 
 It runs when a source tells it there is a release: the source's pipeline
 sends a `release` repository dispatch once its integration tests have passed

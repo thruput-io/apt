@@ -25,7 +25,7 @@ architectures=$(
   for deb in "$packages"/*.deb; do dpkg-deb --field "$deb" Architecture; done \
     | grep -vx all | sort -u | tr '\n' ' '
 )
-: "${architectures:=amd64}"
+: "${architectures:?archive.sh: no .deb in $packages names an architecture}"
 
 cat > "$conf/distributions" <<DISTRIBUTION
 Origin: thruput-io

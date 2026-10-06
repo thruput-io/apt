@@ -53,9 +53,29 @@ jobs:
         with:
           path: site
 
+  verify:
+    name: install every package from the built archive
+    needs: build
+    runs-on: ubuntu-latest
+    container: debian:testing-slim
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: pages
+      - run: |
+          set -euo pipefail
+          mkdir /archive
+          tar -xf pages/artifact.tar -C /archive
+          sed 's|^URIs: .*|URIs: file:/archive|' /archive/thruput-io.sources > /etc/apt/sources.list.d/thruput-io.sources
+          apt-get update -o APT::Update::Error-Mode=any
+          mapfile -t packages < <(awk '/^Package: / { print $2 }' "/archive/dists/stable/main/binary-$(dpkg --print-architecture)/Packages" | sort -u)
+          apt-get install -y --no-install-recommends "${packages[@]}"
+          echo "installed from the built archive: ${#packages[@]} packages"
+
   deploy:
     name: deploy to pages
-    needs: build
+    needs: [build, verify]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -67,8 +87,8 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  verify:
-    name: install every package from the published archive
+  serve:
+    name: the published archive is served signed
     needs: [build, deploy]
     runs-on: ubuntu-latest
     container: debian:testing-slim
@@ -80,7 +100,4 @@ jobs:
           apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
           curl -fsSL "$URL/thruput-io.sources" -o /etc/apt/sources.list.d/thruput-io.sources
           apt-get update -o APT::Update::Error-Mode=any
-          packages=$(curl -fsSL "$URL/dists/stable/main/binary-$(dpkg --print-architecture)/Packages" \
-            | awk '/^Package: / { print $2 }' | sort -u)
-          apt-get install -y --no-install-recommends $packages
-          echo "installed from $URL: $(echo $packages | wc -w) packages"
+          echo "served signed from $URL"
