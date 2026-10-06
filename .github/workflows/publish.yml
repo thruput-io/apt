@@ -1,0 +1,89 @@
+name: publish
+
+on:
+  repository_dispatch:
+    types: [release]
+  workflow_run:
+    workflows: [key]
+    types: [completed]
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: build and sign the archive
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.pages.outputs.base_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pages
+        uses: actions/configure-pages@v5
+      - id: releases
+        name: take the latest release of every source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p debs site
+          while read -r repo; do
+            [ -n "$repo" ] || continue
+            tag=$(gh release view --repo "$repo" --json tagName --jq .tagName)
+            gh release download "$tag" --repo "$repo" --pattern '*.deb' --dir debs
+            echo "$repo $tag"
+          done < sources.txt > site/releases.txt
+          cat site/releases.txt
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends reprepro gnupg
+      - env:
+          ARCHIVE_SIGNING_KEY: ${{ secrets.ARCHIVE_SIGNING_KEY }}
+          URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "${ARCHIVE_SIGNING_KEY:?the repository has no ARCHIVE_SIGNING_KEY secret, run the key workflow}" > "$key"
+          bash scripts/archive.sh debs site "$URL" "$key"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  verify:
+    name: install every package from the built archive
+    needs: build
+    runs-on: ubuntu-latest
+    container: debian:testing-slim
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: pages
+      - run: |
+          set -euo pipefail
+          mkdir /archive
+          tar -xf pages/artifact.tar -C /archive
+          sed 's|^URIs: .*|URIs: file:/archive|' /archive/thruput-io.sources > /etc/apt/sources.list.d/thruput-io.sources
+          apt-get update -o APT::Update::Error-Mode=any
+          mapfile -t packages < <(awk '/^Package: / { print $2 }' "/archive/dists/stable/main/binary-$(dpkg --print-architecture)/Packages" | sort -u)
+          apt-get install -y --no-install-recommends "${packages[@]}"
+          echo "installed from the built archive: ${#packages[@]} packages"
+
+  deploy:
+    name: deploy to pages
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+

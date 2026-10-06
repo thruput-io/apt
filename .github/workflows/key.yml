@@ -1,0 +1,35 @@
+name: key
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/key.yml]
+
+jobs:
+  key:
+    name: Generate the key the archive is signed with
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate App Token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HEMMING_APP_ID }}
+          private-key: ${{ secrets.HEMMING_PRIVATE_KEY }}
+
+      - name: Generate and store the signing key
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          secret=$(mktemp)
+          trap 'rm -f "$secret"' EXIT
+
+          bash scripts/generate-key.sh > "$secret"
+          test -s "$secret"
+
+          gh secret set ARCHIVE_SIGNING_KEY --repo "$GITHUB_REPOSITORY" < "$secret"
+          gh secret list --repo "$GITHUB_REPOSITORY" | grep -q '^ARCHIVE_SIGNING_KEY[[:space:]]'
