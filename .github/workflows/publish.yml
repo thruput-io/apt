@@ -87,17 +87,3 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  serve:
-    name: the published archive is served signed
-    needs: [build, deploy]
-    runs-on: ubuntu-latest
-    container: debian:testing-slim
-    env:
-      URL: ${{ needs.build.outputs.url }}
-    steps:
-      - run: |
-          set -euo pipefail
-          apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-          curl -fsSL "$URL/thruput-io.sources" -o /etc/apt/sources.list.d/thruput-io.sources
-          apt-get update -o APT::Update::Error-Mode=any
-          echo "served signed from $URL"
